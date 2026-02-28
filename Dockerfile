@@ -59,8 +59,8 @@ RUN pip3 install --no-cache-dir --break-system-packages \
 # 5. Bun & PNPM
 # ============================================
 RUN curl -fsSL https://bun.sh/install | bash \
-    && mv /root/.bun/bin/bun /usr/local/bin/bun \
-    && rm -rf /root/.bun
+    && mv /home/openclaw/.bun/bin/bun /usr/local/bin/bun \
+    && rm -rf /home/openclaw/.bun
 
 RUN corepack enable && corepack prepare pnpm@9 --activate
 
