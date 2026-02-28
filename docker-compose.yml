@@ -1,0 +1,112 @@
+services:
+  # ==========================================
+  # PostgreSQL + pgvector
+  # ==========================================
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: openclaw-postgres
+    restart: always
+    environment:
+      POSTGRES_USER: ${DB_USER:-openclaw}
+      POSTGRES_PASSWORD: ${DB_PASS:-securepassword}
+      POSTGRES_DB: ${DB_NAME:-openclaw_memory}
+    volumes:
+      - ./data/postgres:/var/lib/postgresql/data
+    networks:
+      - traefik-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-openclaw} -d ${DB_NAME:-openclaw_memory}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # ==========================================
+  # OpenClaw Gateway
+  # ==========================================
+  openclaw-gateway:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: openclaw:local
+    container_name: openclaw-gateway
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    expose:
+      - "18789"
+    volumes:
+      - ./data/openclaw:/home/openclaw/.openclaw
+      - ./data/zalo:/home/openclaw/.openzca
+    env_file: .env
+    environment:
+      - NODE_ENV=production
+      - OPENCLAW_GATEWAY_MODE=remote
+      - GATEWAY_TRUSTED_PROXIES=0.0.0.0/0
+      - OPENCLAW_STATE_DIR=/home/openclaw/.openclaw
+      # --- Database ---
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_USER=${DB_USER:-openclaw}
+      - DB_PASS=${DB_PASS:-securepassword}
+      - DB_NAME=${DB_NAME:-openclaw_memory}
+      # --- Memory & Vector ---
+      - MEMORY_TYPE=postgres
+      - MEMORY_BACKEND=postgres
+      - VECTOR_STORE=pgvector
+      - EMBEDDING_PROVIDER=openai
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      # --- Config Plugins & Channels ---
+      - 'OPENCLAW_CHANNELS_OPENZALO_ALLOWFROM=["*"]'
+    command: ["node", "/app/dist/index.js", "gateway", "--bind", "lan"]
+    networks:
+      - traefik-network
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.openclaw.rule=Host(`${SUBDOMAIN}.${DOMAIN_NAME}`)"
+      - "traefik.http.routers.openclaw.entrypoints=websecure"
+      - "traefik.http.routers.openclaw.tls.certresolver=letsencrypt"
+      - "traefik.http.services.openclaw.loadbalancer.server.port=18789"
+      - "traefik.http.middlewares.openclaw-headers.headers.customrequestheaders.X-Forwarded-Proto=https"
+      - "traefik.http.middlewares.openclaw-compress.compress=true"
+      - "traefik.http.routers.openclaw.middlewares=openclaw-headers,openclaw-compress"
+
+  # ==========================================
+  # OpenClaw CLI (dùng chung image đã build)
+  # ==========================================
+  openclaw-cli:
+    image: openclaw:local
+    container_name: openclaw-cli
+    depends_on:
+      postgres:
+        condition: service_healthy
+      openclaw-gateway:
+        condition: service_started
+    volumes:
+      - ./data/openclaw:/home/openclaw/.openclaw
+      - ./data/zalo:/home/openclaw/.openzca
+    env_file: .env
+    environment:
+      - NODE_ENV=production
+      - OPENCLAW_STATE_DIR=/home/openclaw/.openclaw
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_USER=${DB_USER:-openclaw}
+      - DB_PASS=${DB_PASS:-securepassword}
+      - DB_NAME=${DB_NAME:-openclaw_memory}
+      - MEMORY_TYPE=postgres
+      - MEMORY_BACKEND=postgres
+      - VECTOR_STORE=pgvector
+      - EMBEDDING_PROVIDER=openai
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - OPENCLAW_ALLOW_UNCONFIGURED=true
+    command: ["node", "/app/dist/index.js", "--help"]
+    networks:
+      - traefik-network
+    profiles: [cli]
+    stdin_open: true
+    tty: true
+
+networks:
+  traefik-network:
+    external: true
