@@ -15,7 +15,7 @@ services:
     networks:
       - traefik-net
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-openclaw} -d ${DB_NAME:-openclaw_memory}"]
+      test: [ "CMD-SHELL", "pg_isready -U ${DB_USER:-openclaw} -d ${DB_NAME:-openclaw_memory}" ]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -58,7 +58,7 @@ services:
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       # --- Config Plugins & Channels ---
       - 'OPENCLAW_CHANNELS_OPENZALO_ALLOWFROM=["*"]'
-    command: ["node", "/app/dist/index.js", "gateway", "--bind", "lan"]
+    command: [ "node", "/app/dist/index.js", "gateway", "--bind", "lan" ]
     networks:
       - traefik-net
     labels:
@@ -103,10 +103,10 @@ services:
       # Fix PATH cho sh -lc login shell (openclaw onboard)
       - PATH=/home/openclaw/.npm-global/bin:/pnpm:/usr/local/bin:/usr/bin:/bin
       - OPENCLAW_ALLOW_INSECURE_PRIVATE_WS=1
-    command: ["node", "/app/dist/index.js", "--help"]
+    command: [ "node", "/app/dist/index.js", "--help" ]
     networks:
       - traefik-net
-    profiles: [cli]
+    profiles: [ cli ]
     stdin_open: true
     tty: true
 
