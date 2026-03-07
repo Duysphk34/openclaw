@@ -41,7 +41,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # ============================================
 # 3. Global NPM Tools (Gemini CLI + OpenZCA)
 # ============================================
-# Đã bao gồm Bước 1 trong hướng dẫn: Cài openzca
 RUN npm install -g @google/gemini-cli openzca \
     && ln -sf "$(npm prefix -g)/bin/gemini" /usr/bin/gemini \
     && npm cache clean --force
@@ -55,6 +54,58 @@ RUN pip3 install --no-cache-dir --break-system-packages \
     && python3 -m playwright install-deps chromium \
     && python3 -m playwright install chromium \
     && rm -rf /tmp/playwright* /root/.cache/pip
+
+# ============================================
+# 4b. Clone các Git Repos — baked vào image lúc build
+#     Không bị mất khi docker compose down/up
+# ============================================
+
+# --- neural-memory (OpenClaw Skill dạng .md) ---
+# Entrypoint sẽ copy sang ~/.openclaw/skills/ khi khởi động lần đầu
+RUN git clone --depth 1 https://github.com/nhadaututtheky/neural-memory.git \
+        /opt/neural-memory-src
+
+# --- Google Workspace CLI ---
+RUN git clone --depth 1 https://github.com/googleworkspace/cli.git \
+        /opt/googleworkspace-cli \
+    && if [ -f /opt/googleworkspace-cli/package.json ]; then \
+           npm install --prefix /opt/googleworkspace-cli; \
+       fi
+
+# --- Camofox Browser ---
+RUN git clone --depth 1 https://github.com/jo-inc/camofox-browser.git \
+        /opt/camofox-browser \
+    && if [ -f /opt/camofox-browser/requirements.txt ]; then \
+           pip3 install --no-cache-dir --break-system-packages \
+               -r /opt/camofox-browser/requirements.txt; \
+       fi \
+    && rm -rf /root/.cache/pip
+
+# --- Crawl4AI source (pip đã cài ở bước 4, giữ source để dùng locally) ---
+RUN git clone --depth 1 https://github.com/unclecode/crawl4ai.git \
+        /opt/crawl4ai
+
+# ============================================
+# 4c. Fix lỗi PATH not found khi chạy openclaw onboard
+#     Nguyên nhân: openclaw dùng "sh -lc" (login shell)
+#     Login shell source /etc/profile → reset PATH → mất tool
+#     Fix: thêm script vào /etc/profile.d/ để giữ PATH đúng
+# ============================================
+RUN printf '%s\n' \
+    '# OpenClaw — giữ PATH đúng trong mọi login shell context' \
+    'export PATH="/home/openclaw/.npm-global/bin:/pnpm:/usr/local/bin:${PATH}"' \
+    'export PNPM_HOME="/pnpm"' \
+    'export NODE_ENV=production' \
+    'export OPENCLAW_STATE_DIR=/home/openclaw/.openclaw' \
+    'export HOME=/home/openclaw' \
+    > /etc/profile.d/openclaw-path.sh \
+    && chmod +x /etc/profile.d/openclaw-path.sh
+
+# Wrapper /usr/local/bin/openclaw → node /app/dist/index.js
+# Để lệnh "openclaw onboard" hoạt động trong mọi shell context
+RUN printf '#!/bin/sh\nexec node /app/dist/index.js "$@"\n' \
+        > /usr/local/bin/openclaw \
+    && chmod +x /usr/local/bin/openclaw
 
 # ============================================
 # 5. Bun & PNPM
@@ -77,7 +128,11 @@ RUN userdel -r node 2>/dev/null || true \
     && mkdir -p /home/openclaw/.npm-global \
     && chown -R openclaw:openclaw /home/openclaw/.npm-global \
     && echo "prefix=/home/openclaw/.npm-global" > /home/openclaw/.npmrc \
-    && chown openclaw:openclaw /home/openclaw/.npmrc
+    && chown openclaw:openclaw /home/openclaw/.npmrc \
+    && chown -R openclaw:openclaw /opt/neural-memory-src \
+    && chown -R openclaw:openclaw /opt/googleworkspace-cli \
+    && chown -R openclaw:openclaw /opt/camofox-browser \
+    && chown -R openclaw:openclaw /opt/crawl4ai
 
 # ============================================
 # 7. Helper Scripts
@@ -134,7 +189,7 @@ USER root
 RUN git clone --depth 1 https://github.com/darkamenosa/openzalo.git /opt/openzalo-src
 
 # ============================================
-# 10. Entrypoint Script (Đã xóa các kịch bản gây lỗi)
+# 10. Entrypoint Script
 # ============================================
 RUN cat > /usr/local/bin/entrypoint.sh << 'ENTRY'
 #!/bin/bash
@@ -176,7 +231,7 @@ if [ ! -f "$CONFIG_FILE" ]; then
       "dangerouslyAllowHostHeaderOriginFallback": true,
       "allowInsecureAuth": true
     },
-    "auth": { "mode": "token", "token": "9be8fbfb216deb4f5aab122345128d76c43e7cc1a0857e7f5039f883a2a15e26" },
+    "auth": { "mode": "token", "token": "c95e046c2e849446da864f322fb9ef97bd6202181769da96dc39332bcacbd216" },
     "trustedProxies": [ "0.0.0.0/0" ]
   }
 }
@@ -184,12 +239,25 @@ EOF
     chown openclaw:openclaw "$CONFIG_FILE"
 fi
 
-# 3. Cài đặt OpenZalo bằng quyền ROOT (Bước 2 của hướng dẫn)
+# 3. Cài neural-memory Skill (copy .md vào ~/.openclaw/skills/)
+NEURAL_MEMORY_SRC="/opt/neural-memory-src"
+NEURAL_MEMORY_MARKER="/home/openclaw/.openclaw/.neural-memory-installed"
+if [ ! -f "$NEURAL_MEMORY_MARKER" ] && [ -d "$NEURAL_MEMORY_SRC" ]; then
+    echo "[entrypoint] 🧠 Cài neural-memory skill..."
+    mkdir -p /home/openclaw/.openclaw/skills
+    find "$NEURAL_MEMORY_SRC" -maxdepth 2 -name "*.md" \
+        -exec cp {} /home/openclaw/.openclaw/skills/ \;
+    [ -d "$NEURAL_MEMORY_SRC/skills" ] && \
+        cp -r "$NEURAL_MEMORY_SRC/skills/." /home/openclaw/.openclaw/skills/
+    chown -R openclaw:openclaw /home/openclaw/.openclaw/skills
+    touch "$NEURAL_MEMORY_MARKER"
+    echo "[entrypoint] ✅ neural-memory skill đã cài vào ~/.openclaw/skills/"
+fi
+
+# 4. Cài đặt OpenZalo bằng quyền ROOT (Bước 2 của hướng dẫn)
 if [ ! -f "$MARKER_FILE" ]; then
     echo "[entrypoint] 📦 Đang cài đặt plugin OpenZalo bằng quyền root..."
-    # Cài bằng user root để vượt qua kiểm tra bảo mật (uid=0)
     $OPENCLAW_BIN plugins install "$OPENZALO_SRC" 2>&1
-    # Bắt buộc khóa quyền thư mục này cho root
     chown -R root:root "$OPENZALO_EXT"
     touch "$MARKER_FILE"
     echo "[entrypoint] ✅ OpenZalo đã cài thành công chuẩn quyền root."
