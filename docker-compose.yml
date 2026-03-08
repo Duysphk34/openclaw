@@ -124,7 +124,8 @@ services:
 
 networks:
   traefik-net:
-    external: true
+    name: traefik-net
+    # removed external: true to avoid 'network not found' if Traefik hasn't created it yet
 
 # ==========================================
 # Named Volumes — Persistent Repos

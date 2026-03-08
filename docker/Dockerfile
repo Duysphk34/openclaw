@@ -106,6 +106,7 @@ RUN printf '%s\n' \
     'export OPENCLAW_STATE_DIR=/home/openclaw/.openclaw' \
     'export HOME=/home/openclaw' \
     > /etc/profile.d/openclaw-path.sh \
+    && sed -i 's/\r$//' /etc/profile.d/openclaw-path.sh \
     && chmod +x /etc/profile.d/openclaw-path.sh
 
 # Wrapper /usr/local/bin/openclaw → node /app/dist/index.js
@@ -165,7 +166,8 @@ sudo npm install -g "$@"
 echo "✅ Đã cài xong: $@"
 EOF
 
-RUN chmod +x /usr/local/bin/install-pkg \
+RUN sed -i 's/\r$//' /usr/local/bin/install-pkg /usr/local/bin/install-pip /usr/local/bin/install-npm \
+    && chmod +x /usr/local/bin/install-pkg \
              /usr/local/bin/install-pip \
              /usr/local/bin/install-npm
 
@@ -332,7 +334,8 @@ cd /home/openclaw/.openclaw/workspace
 
 exec $GOSU openclaw $FINAL_CMD
 ENTRY
-RUN chmod +x /usr/local/bin/entrypoint.sh
+RUN sed -i 's/\r$//' /usr/local/bin/entrypoint.sh \
+    && chmod +x /usr/local/bin/entrypoint.sh
 
 # ============================================
 # 10. Healthcheck & Runtime
