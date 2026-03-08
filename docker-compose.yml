@@ -15,7 +15,7 @@ services:
     networks:
       - traefik-net
     healthcheck:
-      test: [ "CMD-SHELL", "pg_isready -U ${DB_USER:-openclaw} -d ${DB_NAME:-openclaw_memory}" ]
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-openclaw} -d ${DB_NAME:-openclaw_memory}"]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -38,6 +38,12 @@ services:
     volumes:
       - ${OPENCLAW_DATA_DIR:-./data/openclaw}:/home/openclaw/.openclaw
       - ${ZALO_DATA_DIR:-./data/zalo}:/home/openclaw/.openzca
+      # ✅ Persistent repos — không mất khi docker compose down
+      - openclaw-opt-neural-memory:/opt/neural-memory
+      - openclaw-opt-googleworkspace:/opt/googleworkspace-cli
+      - openclaw-opt-camofox:/opt/camofox-browser
+      - openclaw-opt-crawl4ai:/opt/crawl4ai
+      - openclaw-opt-openzalo:/opt/openzalo-src
     env_file: .env
     environment:
       - NODE_ENV=production
@@ -58,7 +64,7 @@ services:
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       # --- Config Plugins & Channels ---
       - 'OPENCLAW_CHANNELS_OPENZALO_ALLOWFROM=["*"]'
-    command: [ "node", "/app/dist/index.js", "gateway", "--bind", "lan" ]
+    command: ["gateway", "--bind", "lan"]
     networks:
       - traefik-net
     labels:
@@ -85,6 +91,12 @@ services:
     volumes:
       - ${OPENCLAW_DATA_DIR:-./data/openclaw}:/home/openclaw/.openclaw
       - ${ZALO_DATA_DIR:-./data/zalo}:/home/openclaw/.openzca
+      # ✅ Dùng CÙNG volumes với gateway để chia sẻ repos
+      - openclaw-opt-neural-memory:/opt/neural-memory
+      - openclaw-opt-googleworkspace:/opt/googleworkspace-cli
+      - openclaw-opt-camofox:/opt/camofox-browser
+      - openclaw-opt-crawl4ai:/opt/crawl4ai
+      - openclaw-opt-openzalo:/opt/openzalo-src
     env_file: .env
     environment:
       - NODE_ENV=production
@@ -100,16 +112,30 @@ services:
       - EMBEDDING_PROVIDER=openai
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - OPENCLAW_ALLOW_UNCONFIGURED=true
-      # Fix PATH cho sh -lc login shell (openclaw onboard)
       - PATH=/home/openclaw/.npm-global/bin:/pnpm:/usr/local/bin:/usr/bin:/bin
       - OPENCLAW_ALLOW_INSECURE_PRIVATE_WS=1
-    command: [ "node", "/app/dist/index.js", "--help" ]
+    # Không truyền command mặc định — entrypoint sẽ nhận args từ `docker compose run`
+    # Ví dụ: docker compose --profile cli run --rm openclaw-cli onboard
     networks:
       - traefik-net
-    profiles: [ cli ]
+    profiles: [cli]
     stdin_open: true
     tty: true
 
 networks:
   traefik-net:
     external: true
+
+# ==========================================
+# Named Volumes — Persistent Repos
+# ==========================================
+volumes:
+  # Mỗi repo /opt/<name>/ được mount ra volume riêng
+  # → Dữ liệu KHÔNG bị mất khi: docker compose down, restart, recreate
+  # → Khi volume trống (lần đầu hoặc bị xóa): entrypoint tự copy từ seed trong image
+  # → Khi seed không có: entrypoint tự clone lại từ git
+  openclaw-opt-neural-memory:
+  openclaw-opt-googleworkspace:
+  openclaw-opt-camofox:
+  openclaw-opt-crawl4ai:
+  openclaw-opt-openzalo:
