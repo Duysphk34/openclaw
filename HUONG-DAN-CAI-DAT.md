@@ -2,8 +2,8 @@
 
 ## Yêu cầu VPS
 - Ubuntu 22.04+ / Debian 12+
-- RAM: tối thiểu 4GB (khuyến nghị 8GB vì texlive-full lớn)
-- Disk: tối thiểu 20GB trống
+- RAM: tối thiểu 4GB (khuyến nghị 8GB vì texlive-full + AI packages)
+- Disk: tối thiểu 30GB trống (image ~15GB + AI packages ~5GB + data)
 - Docker + Docker Compose đã cài
 - Traefik đã chạy (hoặc reverse proxy khác)
 
@@ -24,7 +24,8 @@ Copy 4 file vào thư mục `~/openclaw/`:
 
 ```
 ~/openclaw/
-├── Dockerfile
+├── docker/
+│   └── Dockerfile
 ├── docker-compose.yml
 ├── .env.example
 └── init.sh
@@ -123,14 +124,16 @@ docker compose logs -f
 Logs gateway thành công sẽ thấy:
 
 ```
-[entrypoint] OpenClaw v4.2-enhanced
-[entrypoint] ✅ Config hợp lệ.
-[entrypoint] ✅ OpenZalo đã cài thành công.
-[patch] ✅ Đã thêm cấu hình channels.openzalo
-[entrypoint] 🩺 Chạy doctor --fix tự động...
-[entrypoint] ✅ PostgreSQL sẵn sàng.
-[entrypoint] 🚀 Hoàn tất!
+[entrypoint] OpenClaw v4.4-ai-autopkg
+[ai-pkg] 🚀 Bắt đầu cài AI packages...        ← lần đầu (~10-15 phút)
+[ai-pkg] ✅ Đã cài xong 48 packages!
+[repo] ✅ neural-memory đã có trên volume
+[entrypoint] ✅ OpenZalo đã cài.
+[entrypoint] 🩺 Chạy doctor --fix...
+[entrypoint] 🚀 Exec: node /app/dist/index.js gateway --bind lan
 ```
+
+> Lần khởi động tiếp theo sẽ thấy `[ai-pkg] ✅ AI packages đã có trên volume (skip cài đặt)` (~2 giây)
 
 Thoát logs: `Ctrl+C`
 
@@ -215,14 +218,21 @@ docker compose down -v
 ### Dùng CLI
 
 ```bash
-# Chạy lệnh CLI bất kỳ
-docker compose run --rm openclaw-cli \
-  node /app/dist/index.js --help
+# Onboard (cấu hình lần đầu)
+docker compose --profile cli run --rm openclaw-cli onboard
 
 # Doctor fix
-docker compose run --rm openclaw-cli \
-  node /app/dist/index.js doctor --fix --non-interactive
+docker compose --profile cli run --rm openclaw-cli doctor --fix
+
+# Hoặc truyền full command (cũng được)
+docker compose --profile cli run --rm openclaw-cli node /app/dist/index.js doctor --fix
+
+# Help
+docker compose --profile cli run --rm openclaw-cli --help
 ```
+
+> **Lưu ý:** Phải có `--profile cli` khi dùng `openclaw-cli`.
+> Không cần gõ `node /app/dist/index.js` — entrypoint tự thêm.
 
 ### Cài thêm gói trong container
 
@@ -232,8 +242,24 @@ docker exec -it openclaw-gateway bash
 
 # Bên trong container, bot có quyền sudo:
 install-pkg imagemagick        # cài apt package
-install-pip pandas numpy       # cài Python package  
+install-pip pandas numpy       # cài Python package (persist trên volume!)
 install-npm typescript         # cài NPM package
+```
+
+> 💡 Gói cài bằng `install-pip` được lưu vào volume `/opt/ai-persist` → **không mất khi docker compose down**.
+> Gói cài bằng `install-pkg` (apt) sẽ mất khi recreate container.
+
+### Xem AI packages đã cài
+
+```bash
+# Kiểm tra trạng thái AI packages
+docker exec -it openclaw-gateway cat /opt/ai-persist/.ai-packages-installed
+
+# Xem danh sách packages
+docker exec -it openclaw-gateway pip3 list --user
+
+# Cài lại AI packages (nếu cần)
+docker exec -it openclaw-gateway /usr/local/bin/ai-pkg-setup
 ```
 
 ### Cập nhật OpenClaw lên version mới
@@ -287,4 +313,6 @@ docker compose restart openclaw-gateway
 | QR code hết hạn | Quét chậm | Chạy lại lệnh login (Bước 9) |
 | Gateway không start | Xem logs | `docker compose logs openclaw-gateway` |
 | Build quá lâu | texlive-full ~5GB | Bình thường lần đầu, lần sau cache nhanh |
+| AI packages cài lâu | Lần đầu ~10-15 phút | Bình thường, lần sau skip (~2 giây). Xem logs: `docker compose logs openclaw-gateway \| grep ai-pkg` |
+| AI packages mất sau down | Dùng `down -v` xóa volume | Dùng `docker compose down` (không có `-v`) để giữ volumes |
 | Port 18789 đã dùng | Trùng port | Sửa port trong docker-compose.yml |

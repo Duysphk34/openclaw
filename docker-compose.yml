@@ -15,7 +15,7 @@ services:
     networks:
       - traefik-net
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-openclaw} -d ${DB_NAME:-openclaw_memory}"]
+      test: [ "CMD-SHELL", "pg_isready -U ${DB_USER:-openclaw} -d ${DB_NAME:-openclaw_memory}" ]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -44,6 +44,8 @@ services:
       - openclaw-opt-camofox:/opt/camofox-browser
       - openclaw-opt-crawl4ai:/opt/crawl4ai
       - openclaw-opt-openzalo:/opt/openzalo-src
+      # ✅ AI packages persist — cài 1 lần, down/up không mất
+      - openclaw-ai-persist:/opt/ai-persist
     env_file: .env
     environment:
       - NODE_ENV=production
@@ -64,7 +66,7 @@ services:
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       # --- Config Plugins & Channels ---
       - 'OPENCLAW_CHANNELS_OPENZALO_ALLOWFROM=["*"]'
-    command: ["gateway", "--bind", "lan"]
+    command: [ "gateway", "--bind", "lan" ]
     networks:
       - traefik-net
     labels:
@@ -97,6 +99,8 @@ services:
       - openclaw-opt-camofox:/opt/camofox-browser
       - openclaw-opt-crawl4ai:/opt/crawl4ai
       - openclaw-opt-openzalo:/opt/openzalo-src
+      # ✅ AI packages persist — dùng chung với gateway
+      - openclaw-ai-persist:/opt/ai-persist
     env_file: .env
     environment:
       - NODE_ENV=production
@@ -112,20 +116,20 @@ services:
       - EMBEDDING_PROVIDER=openai
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - OPENCLAW_ALLOW_UNCONFIGURED=true
-      - PATH=/home/openclaw/.npm-global/bin:/pnpm:/usr/local/bin:/usr/bin:/bin
+      - PATH=/opt/ai-persist/python-packages/bin:/home/openclaw/.npm-global/bin:/pnpm:/usr/local/bin:/usr/bin:/bin
+      - PIP_CACHE_DIR=/opt/ai-persist/pip-cache
       - OPENCLAW_ALLOW_INSECURE_PRIVATE_WS=1
     # Không truyền command mặc định — entrypoint sẽ nhận args từ `docker compose run`
     # Ví dụ: docker compose --profile cli run --rm openclaw-cli onboard
     networks:
       - traefik-net
-    profiles: [cli]
+    profiles: [ cli ]
     stdin_open: true
     tty: true
 
 networks:
   traefik-net:
-    name: traefik-net
-    # removed external: true to avoid 'network not found' if Traefik hasn't created it yet
+    external: true
 
 # ==========================================
 # Named Volumes — Persistent Repos
@@ -139,4 +143,6 @@ volumes:
   openclaw-opt-googleworkspace:
   openclaw-opt-camofox:
   openclaw-opt-crawl4ai:
-  openclaw-opt-openzalo:
+  openclaw-opt-openzalo: # ✅ AI packages + pip cache — persist qua mọi lần down/up/restart
+
+  openclaw-ai-persist:

@@ -1,7 +1,7 @@
 FROM node:22-bookworm
 LABEL maintainer="OpenClaw Community"
-LABEL description="OpenClaw - Enhanced with LaTeX, Pandoc, Gemini CLI, Crawl4AI, AI Toolkit"
-LABEL version="4.4-ai-autopkg"
+LABEL description="OpenClaw - Enhanced with LaTeX, Pandoc, Gemini CLI, Crawl4AI"
+LABEL version="4.3-persistent"
 
 # ============================================
 # Environment
@@ -14,14 +14,7 @@ ENV NODE_ENV=production \
     HOME=/home/openclaw \
     OPENCLAW_STATE_DIR=/home/openclaw/.openclaw \
     DEBIAN_FRONTEND=noninteractive \
-    PYTHONUNBUFFERED=1 \
-    PIP_CACHE_DIR=/opt/ai-persist/pip-cache \
-    AI_PERSIST_DIR=/opt/ai-persist \
-    AI_PKG_DIR=/opt/ai-persist/python-packages
-
-# Thêm AI packages bin vào PATH
-# PYTHONPATH sẽ được set dynamically trong entrypoint (vì python version có thể khác)
-ENV PATH="${AI_PKG_DIR}/bin:${PATH}"
+    PYTHONUNBUFFERED=1
 
 # ============================================
 # 1. System Dependencies
@@ -34,13 +27,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     gosu sudo tini \
     apt-utils apt-transport-https software-properties-common \
     postgresql-client \
-    # OCR system deps (nhẹ, cài sẵn vào image)
-    tesseract-ocr tesseract-ocr-vie tesseract-ocr-eng \
-    libgl1-mesa-glx libglib2.0-0 \
-    # Audio deps
-    libsndfile1 \
-    # Build deps cho Python packages
-    cmake pkg-config \
     && ln -snf /usr/share/zoneinfo/$TZ /etc/localtime \
     && echo $TZ > /etc/timezone \
     # FIX: symlink gosu vào /usr/local/bin để luôn tìm thấy trong mọi PATH context
@@ -70,131 +56,6 @@ RUN pip3 install --no-cache-dir --break-system-packages \
     && python3 -m playwright install-deps chromium \
     && python3 -m playwright install chromium \
     && rm -rf /tmp/playwright* /root/.cache/pip
-
-# ============================================
-# 4a. AI Packages List + Auto-Install Script
-#     Gói KHÔNG bake vào image — cài lần đầu khi container start
-#     Persist trên volume → docker compose down KHÔNG mất
-# ============================================
-RUN mkdir -p /opt/ai-persist
-
-# Danh sách gói Python AI cần cài (baked vào image để entrypoint đọc)
-RUN cat > /opt/ai-packages.txt << 'PKGLIST'
-# === AI / LLM SDKs ===
-openai
-anthropic
-google-generativeai
-langchain
-langchain-community
-langchain-openai
-langchain-anthropic
-litellm
-
-# === Embedding & Vector DB ===
-sentence-transformers
-fastembed
-tiktoken
-chromadb
-pgvector
-
-# === RAG & Document Processing ===
-llama-index
-unstructured
-pypdf
-pymupdf
-python-docx
-python-pptx
-openpyxl
-beautifulsoup4
-lxml
-markdownify
-
-# === OCR (Python) ===
-pytesseract
-easyocr
-Pillow
-opencv-python-headless
-
-# === Data Analysis ===
-pandas
-numpy
-scipy
-scikit-learn
-matplotlib
-seaborn
-plotly
-tabulate
-psycopg2-binary
-sqlalchemy
-
-# === Image & Video Processing ===
-moviepy
-rembg
-imageio[ffmpeg]
-
-# === Audio / Speech ===
-openai-whisper
-pydub
-gtts
-edge-tts
-PKGLIST
-
-# Script auto-install: kiểm tra & cài gói thiếu, persist vào volume
-RUN cat > /usr/local/bin/ai-pkg-setup << 'AISCRIPT'
-#!/bin/bash
-# ============================================================
-# AI Package Auto-Install
-# - Đọc danh sách từ /opt/ai-packages.txt
-# - Cài vào /opt/ai-persist/python-packages (volume mount)
-# - Cache pip tại /opt/ai-persist/pip-cache (volume mount)
-# - Lần đầu: cài ~10-15 phút, lần sau: skip ngay (~2 giây)
-# ============================================================
-set -e
-
-PERSIST_DIR="/opt/ai-persist"
-MARKER="$PERSIST_DIR/.ai-packages-installed"
-PKGLIST="/opt/ai-packages.txt"
-PY_PKGS="$PERSIST_DIR/python-packages"
-PIP_CACHE="$PERSIST_DIR/pip-cache"
-
-# Đảm bảo thư mục tồn tại
-mkdir -p "$PY_PKGS" "$PIP_CACHE"
-
-# Nếu marker tồn tại VÀ packages dir không trống → skip
-if [ -f "$MARKER" ] && [ -d "$PY_PKGS/lib" ]; then
-    echo "[ai-pkg] ✅ AI packages đã có trên volume (skip cài đặt)"
-    return 0 2>/dev/null || exit 0
-fi
-
-echo "[ai-pkg] 🚀 Bắt đầu cài AI packages..."
-echo "[ai-pkg] 📦 Target: $PY_PKGS"
-echo "[ai-pkg] 💾 Cache: $PIP_CACHE"
-
-# Lọc bỏ comment và dòng trống
-PACKAGES=$(grep -v '^\s*#' "$PKGLIST" | grep -v '^\s*$' | tr '\n' ' ')
-
-echo "[ai-pkg] 📋 Packages: $PACKAGES"
-
-# Cài bằng --prefix → tạo cả lib + bin vào $PY_PKGS
-# --prefix hoạt động đúng với root, không cần --user
-pip3 install --break-system-packages \
-    --cache-dir "$PIP_CACHE" \
-    --prefix "$PY_PKGS" \
-    $PACKAGES \
-    2>&1 | tail -5
-
-# Chown toàn bộ cho user openclaw
-chown -R 1000:1000 "$PERSIST_DIR" 2>/dev/null || true
-
-# Ghi marker với timestamp
-echo "installed=$(date -Iseconds)" > "$MARKER"
-echo "packages=$(echo $PACKAGES | wc -w)" >> "$MARKER"
-
-echo "[ai-pkg] ✅ Đã cài xong $(echo $PACKAGES | wc -w) packages!"
-echo "[ai-pkg] 💡 Packages persist tại volume, không mất khi docker compose down"
-AISCRIPT
-RUN sed -i 's/\r$//' /usr/local/bin/ai-pkg-setup \
-    && chmod +x /usr/local/bin/ai-pkg-setup
 
 # ============================================
 # 4b. Clone repos vào /opt/repos-seed/ (baked vào image)
@@ -239,15 +100,11 @@ RUN mkdir -p \
 # ============================================
 RUN printf '%s\n' \
     '# OpenClaw — giữ PATH đúng trong mọi login shell context' \
-    'export PATH="/opt/ai-persist/python-packages/bin:/home/openclaw/.npm-global/bin:/pnpm:/usr/local/bin:${PATH}"' \
+    'export PATH="/home/openclaw/.npm-global/bin:/pnpm:/usr/local/bin:${PATH}"' \
     'export PNPM_HOME="/pnpm"' \
     'export NODE_ENV=production' \
     'export OPENCLAW_STATE_DIR=/home/openclaw/.openclaw' \
     'export HOME=/home/openclaw' \
-    'export PIP_CACHE_DIR=/opt/ai-persist/pip-cache' \
-    '# PYTHONPATH set dynamically — detect python version' \
-    'PYVER=$(python3 -c "import sys; print(f\"{sys.version_info.major}.{sys.version_info.minor}\")" 2>/dev/null || echo "3.11")' \
-    'export PYTHONPATH="/opt/ai-persist/python-packages/lib/python${PYVER}/site-packages:${PYTHONPATH:-}"' \
     > /etc/profile.d/openclaw-path.sh \
     && sed -i 's/\r$//' /etc/profile.d/openclaw-path.sh \
     && chmod +x /etc/profile.d/openclaw-path.sh
@@ -297,11 +154,8 @@ RUN cat > /usr/local/bin/install-pip << 'EOF'
 #!/bin/bash
 set -e
 echo "🐍 Đang cài Python package: $@"
-pip3 install --break-system-packages \
-    --cache-dir /opt/ai-persist/pip-cache \
-    --prefix /opt/ai-persist/python-packages \
-    "$@"
-echo "✅ Đã cài xong: $@ (persist trên volume)"
+pip3 install --break-system-packages "$@"
+echo "✅ Đã cài xong: $@"
 EOF
 
 RUN cat > /usr/local/bin/install-npm << 'EOF'
@@ -347,24 +201,10 @@ CONFIG_FILE="/home/openclaw/.openclaw/openclaw.json"
 MARKER_OPENZALO="/home/openclaw/.openclaw/.openzalo-installed"
 SEED_DIR="/opt/repos-seed"
 
-# Setup PYTHONPATH dynamically (detect python version)
-PYVER=$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')
-AI_SITE="/opt/ai-persist/python-packages/lib/python${PYVER}/site-packages"
-export PYTHONPATH="${AI_SITE}:${PYTHONPATH:-}"
-
 echo "=========================================="
-echo "[entrypoint] OpenClaw v4.4-ai-autopkg"
+echo "[entrypoint] OpenClaw v4.3-persistent"
 echo "[entrypoint] Args: $@"
-echo "[entrypoint] Python: ${PYVER} | AI site: ${AI_SITE}"
 echo "=========================================="
-
-# ============================================================
-# 0. AI PACKAGES AUTO-INSTALL (persist trên volume)
-#    Lần đầu: cài ~10-15 phút
-#    Lần sau: skip ngay (~2 giây)
-# ============================================================
-echo "[entrypoint] 🤖 Kiểm tra AI packages..."
-/usr/local/bin/ai-pkg-setup || echo "[entrypoint] ⚠️  AI packages setup lỗi, tiếp tục..."
 
 # ============================================================
 # HELPER: Đảm bảo repo tồn tại trong /opt/<n>/
@@ -404,9 +244,6 @@ chown -R openclaw:openclaw \
     /opt/camofox-browser \
     /opt/crawl4ai \
     /opt/openzalo-src 2>/dev/null || true
-
-# Chown AI persist dir cho user openclaw
-chown -R openclaw:openclaw /opt/ai-persist 2>/dev/null || true
 
 # 2. Tạo thư mục làm việc
 echo "[entrypoint] 📁 Khởi tạo thư mục..."
@@ -476,29 +313,19 @@ $GOSU openclaw $OPENCLAW_BIN doctor --fix --non-interactive 2>&1 || true
 # ============================================================
 # FIX 2: Tránh double prefix "node /app/... node /app/... onboard"
 #
-# Nếu không có args → hiện help
 # Nếu $1 là "node", "openclaw", hoặc path tuyệt đối
 #   → user đã truyền command đầy đủ, exec trực tiếp
 # Nếu $1 là subcommand như "onboard", "gateway", ...
 #   → prepend $OPENCLAW_BIN
 # ============================================================
-if [ $# -eq 0 ]; then
-    echo "[entrypoint] ⚠️  Không có command, hiển thị help..."
-    FINAL_CMD="$OPENCLAW_BIN --help"
-else
-    case "$1" in
-        node|openclaw|/usr/local/bin/openclaw|/usr/bin/node)
-            FINAL_CMD="$@"
-            ;;
-        bash|sh|/bin/bash|/bin/sh)
-            # Shell access — exec trực tiếp, không qua openclaw
-            FINAL_CMD="$@"
-            ;;
-        *)
-            FINAL_CMD="$OPENCLAW_BIN $@"
-            ;;
-    esac
-fi
+case "$1" in
+    node|openclaw|/usr/local/bin/openclaw|/usr/bin/node)
+        FINAL_CMD="$@"
+        ;;
+    *)
+        FINAL_CMD="$OPENCLAW_BIN $@"
+        ;;
+esac
 
 echo "=========================================="
 echo "[entrypoint] 🚀 Exec: $FINAL_CMD"
@@ -513,7 +340,7 @@ RUN sed -i 's/\r$//' /usr/local/bin/entrypoint.sh \
 # ============================================
 # 10. Healthcheck & Runtime
 # ============================================
-HEALTHCHECK --interval=30s --timeout=10s --start-period=120s --retries=3 \
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
     CMD curl -sf http://localhost:18789/health || exit 1
 
 STOPSIGNAL SIGTERM
