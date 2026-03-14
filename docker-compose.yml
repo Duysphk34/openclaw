@@ -13,7 +13,7 @@ services:
     volumes:
       - ${POSTGRES_DATA_DIR:-./data/postgres}:/var/lib/postgresql/data
     networks:
-      - traefik-net
+      - traefik-network
     healthcheck:
       test: [ "CMD-SHELL", "pg_isready -U ${DB_USER:-openclaw} -d ${DB_NAME:-openclaw_memory}" ]
       interval: 5s
@@ -68,7 +68,7 @@ services:
       - 'OPENCLAW_CHANNELS_OPENZALO_ALLOWFROM=["*"]'
     command: [ "gateway", "--bind", "lan" ]
     networks:
-      - traefik-net
+      - traefik-network
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.openclaw.rule=Host(`${SUBDOMAIN}.${DOMAIN_NAME}`)"
@@ -122,13 +122,13 @@ services:
     # Không truyền command mặc định — entrypoint sẽ nhận args từ `docker compose run`
     # Ví dụ: docker compose --profile cli run --rm openclaw-cli onboard
     networks:
-      - traefik-net
+      - traefik-network
     profiles: [ cli ]
     stdin_open: true
     tty: true
 
 networks:
-  traefik-net:
+  traefik-network:
     external: true
 
 # ==========================================
@@ -143,6 +143,6 @@ volumes:
   openclaw-opt-googleworkspace:
   openclaw-opt-camofox:
   openclaw-opt-crawl4ai:
-  openclaw-opt-openzalo: # ✅ AI packages + pip cache — persist qua mọi lần down/up/restart
-
+  openclaw-opt-openzalo:
+  # ✅ AI packages + pip cache — persist qua mọi lần down/up/restart
   openclaw-ai-persist:
